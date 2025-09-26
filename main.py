@@ -1,4 +1,5 @@
 from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
@@ -14,8 +15,10 @@ from linebot.v3.messaging import (
 )
 import logging
 import json
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
 from linebot.v3 import WebhookHandler
+import sqlite3
 
 app = FastAPI()
 logging.basicConfig(level=logging.INFO)
@@ -38,7 +41,6 @@ worksheet_printer_2 = os.getenv("WORKSHEET_PRINTER_2")
 
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_ACCESS_TOKEN")
-USER_ID = os.getenv("USER_ID")
 
 configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
@@ -46,6 +48,51 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 credentials = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", SCOPES)
 
 client = gspread.authorize(credentials)
+
+def init_db():
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT UNIQUE NOT NULL,
+            name TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def add_user(user_id, name=None):
+    """เพิ่มผู้ใช้ใหม่"""
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    try:
+        cursor.execute('INSERT INTO users (user_id, name) VALUES (?, ?)', (user_id, name))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False 
+    finally:
+        conn.close()
+
+def get_all_users():
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT user_id, name FROM users')
+    users = cursor.fetchall()
+    conn.close()
+    return users
+
+def delete_user(user_id):
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM users WHERE user_id = ?', (user_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
+init_db()
 
 @app.post("/webhook")
 async def webhook(request: Request):
@@ -61,6 +108,128 @@ async def webhook(request: Request):
                 print(f"User ID: {user_id}")
     
     return 'OK'
+
+@app.get("/check")
+async def check_printers():
+    try:
+        job()
+        return {"status": "success", "message": "ตรวจสอบสถานะเครื่องพิมพ์เรียบร้อยแล้ว"}
+    except Exception as e:
+        return {"status": "error", "message": f"เกิดข้อผิดพลาด: {str(e)}"}
+
+@app.get("/users", response_class=HTMLResponse)
+async def users_page():
+    users = get_all_users()
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="th">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>จัดการผู้ใช้ LINE Bot</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+    </head>
+    <body class="bg-gray-50 min-h-screen">
+        <div class="max-w-4xl mx-auto py-8 px-4">
+            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <h1 class="text-2xl font-bold text-gray-800 mb-6">จัดการผู้ใช้ LINE Bot</h1>
+                
+                <!-- Add User Form -->
+                <div class="bg-blue-50 rounded-lg p-4 mb-6">
+                    <h2 class="text-lg font-semibold text-blue-800 mb-4">เพิ่มผู้ใช้ใหม่</h2>
+                    <form method="POST" action="/users" class="space-y-4">
+                        <div>
+                            <label for="user_id" class="block text-sm font-medium text-gray-700 mb-1">
+                                LINE User ID <span class="text-red-500">*</span>
+                            </label>
+                            <input type="text" id="user_id" name="user_id" required
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                   placeholder="เช่น U1234567890abcdef...">
+                        </div>
+                        <div>
+                            <label for="name" class="block text-sm font-medium text-gray-700 mb-1">
+                                ชื่อ (ไม่บังคับ)
+                            </label>
+                            <input type="text" id="name" name="name"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                   placeholder="ชื่อผู้ใช้">
+                        </div>
+                        <button type="submit" 
+                                class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md transition duration-200">
+                            เพิ่มผู้ใช้
+                        </button>
+                    </form>
+                </div>
+                
+                <!-- Users List -->
+                <div>
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4">รายการผู้ใช้ทั้งหมด ({len(users)} คน)</h2>
+                    {"<div class='bg-gray-100 rounded-lg p-4 text-gray-600'>ยังไม่มีผู้ใช้</div>" if not users else ""}
+                    {"".join([f'''
+                    <div class="bg-white border border-gray-200 rounded-lg p-4 mb-3 flex justify-between items-center">
+                        <div>
+                            <div class="font-medium text-gray-800">{user[1] or "ไม่ระบุชื่อ"}</div>
+                            <div class="text-sm text-gray-600 font-mono">{user[0]}</div>
+                        </div>
+                        <form method="POST" action="/users/delete" class="inline">
+                            <input type="hidden" name="user_id" value="{user[0]}">
+                            <button type="submit" 
+                                    onclick="return confirm('คุณต้องการลบผู้ใช้นี้หรือไม่?')"
+                                    class="bg-red-500 hover:bg-red-600 text-white text-sm px-3 py-1 rounded transition duration-200">
+                                ลบ
+                            </button>
+                        </form>
+                    </div>
+                    ''' for user in users])}
+                </div>
+                
+                <!-- Test Button -->
+                <div class="mt-6 pt-4 border-t border-gray-200">
+                    <button onclick="testPrinter()" 
+                            class="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-md transition duration-200">
+                        check status printer
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <script>
+            async function testPrinter() {{
+                try {{
+                    const response = await fetch('/check');
+                    const data = await response.json();
+                    alert(data.message);
+                }} catch (error) {{
+                    alert('เกิดข้อผิดพลาด: ' + error.message);
+                }}
+            }}
+        </script>
+    </body>
+    </html>
+    """
+    return html_content
+
+@app.post("/users")
+async def add_user_endpoint(user_id: str = Form(...), name: str = Form(None)):
+    if add_user(user_id.strip(), name.strip() if name else None):
+        return RedirectResponse(url="/users", status_code=303)
+    else:
+        return HTMLResponse(
+            f'<script>alert("ผู้ใช้นี้มีอยู่แล้ว!"); window.location.href="/users";</script>',
+            status_code=400
+        )
+
+@app.post("/users/delete")
+async def delete_user_endpoint(user_id: str = Form(...)):
+    if delete_user(user_id):
+        return RedirectResponse(url="/users", status_code=303)
+    else:
+        return HTMLResponse(
+            f'<script>alert("ไม่พบผู้ใช้นี้!"); window.location.href="/users";</script>',
+            status_code=404
+        )
 
 def create_printer_bubble(printer_name, ink_levels):
     """
@@ -146,21 +315,36 @@ def create_printer_bubble(printer_name, ink_levels):
     return bubble
 
 def send_text_message(message_text):
-    """ส่ง text message ปกติ"""
-    try:
-        with ApiClient(configuration) as api_client:
-            line_bot_api = MessagingApi(api_client)
-            line_bot_api.push_message(
-                PushMessageRequest(
-                    to=USER_ID,
-                    messages=[TextMessage(text=message_text)]
+    """ส่ง text message ปกติให้ทุก userId ในฐานข้อมูล"""
+    users = get_all_users()
+    if not users:
+        print("ไม่มีผู้ใช้ในฐานข้อมูล")
+        return
+    
+    success_count = 0
+    for user_id, name in users:
+        try:
+            with ApiClient(configuration) as api_client:
+                line_bot_api = MessagingApi(api_client)
+                line_bot_api.push_message(
+                    PushMessageRequest(
+                        to=user_id,
+                        messages=[TextMessage(text=message_text)]
+                    )
                 )
-            )
-        print(f"Text message sent: {message_text}")
-    except Exception as e:
-        print(f"Error sending text message: {e}")
+            success_count += 1
+            print(f"Text message sent to {name or user_id}: {message_text}")
+        except Exception as e:
+            print(f"Error sending text message to {name or user_id}: {e}")
+    
+    print(f"Text message sent successfully to {success_count}/{len(users)} users")
 
 def handle_flex_message(printer_1_data, printer_2_data):
+    users = get_all_users()
+    if not users:
+        print("ไม่มีผู้ใช้ในฐานข้อมูล")
+        return
+    
     try:
         bubbles = []
         
@@ -189,22 +373,30 @@ def handle_flex_message(printer_1_data, printer_2_data):
                 "contents": bubbles
             }
         
-        with ApiClient(configuration) as api_client:
-            line_bot_api = MessagingApi(api_client)
-            flex_message = json.dumps(flex_content)
-            message = FlexMessage(
-                alt_text="Printer Status", 
-                contents=FlexContainer.from_json(flex_message)
-            )
-            line_bot_api.push_message(
-                PushMessageRequest(
-                    to=USER_ID,
-                    messages=[message]
-                )
-            )
-        print("Flex message sent successfully")
+        success_count = 0
+        for user_id, name in users:
+            try:
+                with ApiClient(configuration) as api_client:
+                    line_bot_api = MessagingApi(api_client)
+                    flex_message = json.dumps(flex_content)
+                    message = FlexMessage(
+                        alt_text="Printer Status", 
+                        contents=FlexContainer.from_json(flex_message)
+                    )
+                    line_bot_api.push_message(
+                        PushMessageRequest(
+                            to=user_id,
+                            messages=[message]
+                        )
+                    )
+                success_count += 1
+                print(f"Flex message sent to {name or user_id}")
+            except Exception as e:
+                print(f"Error sending flex message to {name or user_id}: {e}")
+        
+        print(f"Flex message sent successfully to {success_count}/{len(users)} users")
     except Exception as e:
-        print(f"Error sending flex message: {e}")
+        print(f"Error preparing flex message: {e}")
 
 
 def add_new_row(sheet_name, new_row):
@@ -284,31 +476,27 @@ def job():
     else:
         error_messages.append(f"Printer 2: {result_printer_2['message']}")
 
-    # ส่งข้อความตามผลลัพธ์
     if success_count > 0:
-        # มีข้อมูลสำเร็จอย่างน้อย 1 เครื่อง ส่ง FlexMessage
         handle_flex_message(printer_1_data, printer_2_data)
         
-        # ถ้ามี error บางเครื่อง ส่ง TextMessage เพิ่มเติม
         if error_messages:
             error_text = "❌ มีปัญหากับเครื่องพิมพ์:\n" + "\n".join(error_messages)
             send_text_message(error_text)
     else:
-        # ทุกเครื่องมีปัญหา ส่ง TextMessage เท่านั้น
         error_text = "❌ ไม่สามารถเชื่อมต่อกับเครื่องพิมพ์ได้:\n" + "\n".join(error_messages)
         send_text_message(error_text)
 
-
-
-job()
-
-scheduler = BlockingScheduler(timezone=tz)
-
-scheduler.add_job(job, CronTrigger(hour=7, minute=30, timezone=tz))
-
-print("เริ่มทำงาน scheduler แล้ว (กด Ctrl+C เพื่อหยุด)...")
-scheduler.start()
-
-# if __name__ == '__main__':
-#     import uvicorn
-#     uvicorn.run(app, host="0.0.0.0", port=8000)
+if __name__ == '__main__':
+    import uvicorn
+    
+    scheduler = BackgroundScheduler(timezone=tz)
+    scheduler.add_job(job, CronTrigger(hour='7-16', minute=30, timezone=tz))
+    scheduler.start()
+    
+    print("เริ่มทำงาน scheduler และ web server แล้ว...")
+    
+    try:
+        uvicorn.run(app, host="0.0.0.0", port=8000)
+    except KeyboardInterrupt:
+        scheduler.shutdown()
+        print("หยุดการทำงานแล้ว")
