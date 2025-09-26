@@ -112,7 +112,7 @@ async def webhook(request: Request):
 @app.get("/check")
 async def check_printers():
     try:
-        job()
+        job_7am()  # ใช้ job_7am สำหรับทดสอบ (ส่งทั้ง flex และ text)
         return {"status": "success", "message": "ตรวจสอบสถานะเครื่องพิมพ์เรียบร้อยแล้ว"}
     except Exception as e:
         return {"status": "error", "message": f"เกิดข้อผิดพลาด: {str(e)}"}
@@ -430,34 +430,36 @@ def checkNetworkPrinter(printer_url,worksheet):
             "data": ink_levels
         }            
     except requests.exceptions.ConnectionError:
+        new_row = [datetime.now(tz).strftime("%d/%m/%Y"),0,0,0,0,STATUS_PING["error"]]
+        add_new_row(worksheet,new_row)
         return {
             "success": False,
             "message": "ไม่สามารถเชื่อมต่อกับเครื่องพิมพ์ได้"
         }
     except requests.exceptions.Timeout:
+        new_row = [datetime.now(tz).strftime("%d/%m/%Y"),0,0,0,0,STATUS_PING["timeout"]]
         return {
             "success": False,
             "message": "การเชื่อมต่อหมดเวลา"
         }
     except requests.exceptions.HTTPError | requests.exceptions.RequestException:
+        new_row = [datetime.now(tz).strftime("%d/%m/%Y"),0,0,0,0,STATUS_PING["error"]]
         return {
             "success": False,
             "message": "ไม่สามารถเชื่อมต่อกับเครื่องพิมพ์ได้"
         }
     except Exception as e:
+        new_row = [datetime.now(tz).strftime("%d/%m/%Y"),0,0,0,0,STATUS_PING["error"]]
         return {
             "success": False,
             "message": "เกิดข้อผิดพลาดที่ไม่คาดคิด"
         }
 
-def job():
+def job_7am():
+    """ทำงานเวลา 7:00 น. - ส่งทั้ง flex message และ text message"""
     result_printer_1 = checkNetworkPrinter(printer_1_url, worksheet_printer_1)
     result_printer_2 = checkNetworkPrinter(printer_2_url, worksheet_printer_2)
     
-    print(f"Printer 1: {result_printer_1}")
-    print(f"Printer 2: {result_printer_2}")
-    
-    # ตรวจสอบผลลัพธ์และส่งข้อความ
     success_count = 0
     error_messages = []
     
@@ -476,6 +478,7 @@ def job():
     else:
         error_messages.append(f"Printer 2: {result_printer_2['message']}")
 
+    # ส่งทั้ง flex message และ text message
     if success_count > 0:
         handle_flex_message(printer_1_data, printer_2_data)
         
@@ -486,15 +489,45 @@ def job():
         error_text = "❌ ไม่สามารถเชื่อมต่อกับเครื่องพิมพ์ได้:\n" + "\n".join(error_messages)
         send_text_message(error_text)
 
+def job_check_connection():
+    """ทำงานเวลา 7:30-16:30 น. - แจ้งเตือนเฉพาะเมื่อเชื่อมต่อไม่ได้"""
+    result_printer_1 = checkNetworkPrinter(printer_1_url, worksheet_printer_1)
+    result_printer_2 = checkNetworkPrinter(printer_2_url, worksheet_printer_2)
+    
+    error_messages = []
+    
+    # ตรวจสอบการเชื่อมต่อ - เก็บแค่ error เท่านั้น
+    if not result_printer_1["success"]:
+        error_messages.append(f"❌ Printer 1: {result_printer_1['message']}")
+    
+    if not result_printer_2["success"]:
+        error_messages.append(f"❌ Printer 2: {result_printer_2['message']}")
+
+    # ส่งข้อความเฉพาะเมื่อมีปัญหา
+    if error_messages:
+        error_text = "⚠️ แจ้งเตือนปัญหาเครื่องพิมพ์:\n" + "\n".join(error_messages)
+        send_text_message(error_text)
+    else:
+        print("✅ ทุกเครื่องพิมพ์เชื่อมต่อได้ปกติ - ไม่ส่งข้อความ")
+
 if __name__ == '__main__':
     import uvicorn
     
     scheduler = BackgroundScheduler(timezone=tz)
-    scheduler.add_job(job, CronTrigger(hour='7-16', minute=30, timezone=tz))
+    
+    # 7:00 น. - ส่งทั้ง flex message และ text message
+    scheduler.add_job(job_7am, CronTrigger(hour=7, minute=0, timezone=tz))
+    
+    # 7:30-16:30 น. ทุกชั่วโมงที่ 30 นาที - แจ้งเตือนการเชื่อมต่อเท่านั้น
+    scheduler.add_job(job_check_connection, CronTrigger(hour='7-16', minute=30, timezone=tz))
+    
     scheduler.start()
     
     print("เริ่มทำงาน scheduler และ web server แล้ว...")
-    
+    print("📅 ตารางงาน:")
+    print("   - 07:00 น. = ส่งข้อมูลสถานะเครื่องพิมพ์แบบเต็ม (Flex + Text)")
+    print("   - 07:30-16:30 น. (ทุกชั่วโมง) = แจ้งเตือนเฉพาะเมื่อเชื่อมต่อไม่ได้ (Text)")
+        
     try:
         uvicorn.run(app, host="0.0.0.0", port=8000)
     except KeyboardInterrupt:
