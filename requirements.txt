@@ -9,3 +9,4 @@ lxml==4.9.3
 line-bot-sdk==3.6.0
 fastapi==0.104.1
 uvicorn==0.24.0
+python-multipart
