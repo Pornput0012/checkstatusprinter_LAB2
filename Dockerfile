@@ -18,8 +18,14 @@ COPY main.py .
 COPY credentials.json .
 COPY .env .
 
+# สร้าง directory สำหรับ volume
+RUN mkdir -p /app/data
+
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser
+
+# Mount point สำหรับ database
+VOLUME ["/app/data"]
 
 EXPOSE 8000
 CMD ["python", "main.py"]

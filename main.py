@@ -49,8 +49,11 @@ credentials = ServiceAccountCredentials.from_json_keyfile_name("credentials.json
 
 client = gspread.authorize(credentials)
 
+# Database path - ใช้ volume หรือ local directory
+DB_PATH = '/app/data/users.db' if os.path.exists('/app/data') else 'users.db'
+
 def init_db():
-    conn = sqlite3.connect('users.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
@@ -64,7 +67,7 @@ def init_db():
 
 def add_user(user_id, name=None):
     """เพิ่มผู้ใช้ใหม่"""
-    conn = sqlite3.connect('users.db')
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
         cursor.execute('INSERT INTO users (user_id, name) VALUES (?, ?)', (user_id, name))
