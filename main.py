@@ -414,7 +414,7 @@ def checkNetworkPrinter(printer_url,worksheet):
         soup_printer = BeautifulSoup(response_printer.text, "lxml")
         toners_printer = soup_printer.find_all("img", class_="tonerremain")
 
-        new_row = [datetime.now(tz).strftime("%d/%m/%Y")]
+        new_row = [datetime.now(tz).strftime("%d/%m/%Y %H:%M")]
         ink_levels = []
 
         for img in toners_printer:
@@ -433,26 +433,26 @@ def checkNetworkPrinter(printer_url,worksheet):
             "data": ink_levels
         }            
     except requests.exceptions.ConnectionError:
-        new_row = [datetime.now(tz).strftime("%d/%m/%Y"),0,0,0,0,STATUS_PING["error"]]
+        new_row = [datetime.now(tz).strftime("%d/%m/%Y %H:%M"),0,0,0,0,STATUS_PING["error"]]
         add_new_row(worksheet,new_row)
         return {
             "success": False,
             "message": "ไม่สามารถเชื่อมต่อกับเครื่องพิมพ์ได้"
         }
     except requests.exceptions.Timeout:
-        new_row = [datetime.now(tz).strftime("%d/%m/%Y"),0,0,0,0,STATUS_PING["timeout"]]
+        new_row = [datetime.now(tz).strftime("%d/%m/%Y %H:%M"),0,0,0,0,STATUS_PING["timeout"]]
         return {
             "success": False,
             "message": "การเชื่อมต่อหมดเวลา"
         }
     except requests.exceptions.HTTPError | requests.exceptions.RequestException:
-        new_row = [datetime.now(tz).strftime("%d/%m/%Y"),0,0,0,0,STATUS_PING["error"]]
+        new_row = [datetime.now(tz).strftime("%d/%m/%Y %H:%M"),0,0,0,0,STATUS_PING["error"]]
         return {
             "success": False,
             "message": "ไม่สามารถเชื่อมต่อกับเครื่องพิมพ์ได้"
         }
     except Exception as e:
-        new_row = [datetime.now(tz).strftime("%d/%m/%Y"),0,0,0,0,STATUS_PING["error"]]
+        new_row = [datetime.now(tz).strftime("%d/%m/%Y %H:%M"),0,0,0,0,STATUS_PING["error"]]
         return {
             "success": False,
             "message": "เกิดข้อผิดพลาดที่ไม่คาดคิด"
