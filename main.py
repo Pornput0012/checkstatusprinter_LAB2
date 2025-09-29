@@ -404,7 +404,7 @@ def handle_flex_message(printer_1_data, printer_2_data):
 
 def add_new_row(sheet_name, new_row):
     sheet = client.open_by_url(sheet_url).worksheet(sheet_name)
-    sheet.append_row(new_row)
+    sheet.append_row(new_row, value_input_option="USER_ENTERED")
 
 def checkNetworkPrinter(printer_url,worksheet):
     try:
@@ -414,7 +414,8 @@ def checkNetworkPrinter(printer_url,worksheet):
         soup_printer = BeautifulSoup(response_printer.text, "lxml")
         toners_printer = soup_printer.find_all("img", class_="tonerremain")
 
-        new_row = [datetime.now(tz).strftime("%d/%m/%Y %H:%M")]
+        new_row = [datetime.now(tz).strftime("%m/%d/%Y %H:%M:00")]
+
         ink_levels = []
 
         for img in toners_printer:
@@ -433,26 +434,29 @@ def checkNetworkPrinter(printer_url,worksheet):
             "data": ink_levels
         }            
     except requests.exceptions.ConnectionError:
-        new_row = [datetime.now(tz).strftime("%d/%m/%Y %H:%M"),0,0,0,0,STATUS_PING["error"]]
+        new_row = [datetime.now(tz).strftime("%m/%d/%Y %H:%M:00"),0,0,0,0,STATUS_PING["error"]]
         add_new_row(worksheet,new_row)
         return {
             "success": False,
             "message": "ไม่สามารถเชื่อมต่อกับเครื่องพิมพ์ได้"
         }
     except requests.exceptions.Timeout:
-        new_row = [datetime.now(tz).strftime("%d/%m/%Y %H:%M"),0,0,0,0,STATUS_PING["timeout"]]
+        new_row = [datetime.now(tz).strftime("%m/%d/%Y %H:%M:00"),0,0,0,0,STATUS_PING["timeout"]]
+        add_new_row(worksheet,new_row)
         return {
             "success": False,
             "message": "การเชื่อมต่อหมดเวลา"
         }
-    except requests.exceptions.HTTPError | requests.exceptions.RequestException:
-        new_row = [datetime.now(tz).strftime("%d/%m/%Y %H:%M"),0,0,0,0,STATUS_PING["error"]]
+    except (requests.exceptions.HTTPError,requests.exceptions.RequestException):
+        new_row = [datetime.now(tz).strftime("%m/%d/%Y %H:%M:00"),0,0,0,0,STATUS_PING["error"]]
+        add_new_row(worksheet,new_row)
         return {
             "success": False,
             "message": "ไม่สามารถเชื่อมต่อกับเครื่องพิมพ์ได้"
         }
     except Exception as e:
-        new_row = [datetime.now(tz).strftime("%d/%m/%Y %H:%M"),0,0,0,0,STATUS_PING["error"]]
+        new_row = [datetime.now(tz).strftime("%m/%d/%Y %H:%M:00"),0,0,0,0,STATUS_PING["error"]]
+        add_new_row(worksheet,new_row)
         return {
             "success": False,
             "message": "เกิดข้อผิดพลาดที่ไม่คาดคิด"
@@ -499,14 +503,12 @@ def job_check_connection():
     
     error_messages = []
     
-    # ตรวจสอบการเชื่อมต่อ - เก็บแค่ error เท่านั้น
     if not result_printer_1["success"]:
         error_messages.append(f"❌ Printer 1: {result_printer_1['message']}")
     
     if not result_printer_2["success"]:
         error_messages.append(f"❌ Printer 2: {result_printer_2['message']}")
 
-    # ส่งข้อความเฉพาะเมื่อมีปัญหา
     if error_messages:
         error_text = "⚠️ แจ้งเตือนปัญหาเครื่องพิมพ์:\n" + "\n".join(error_messages)
         send_text_message(error_text)
